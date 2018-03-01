@@ -288,6 +288,54 @@
 #include "Capers_II_Driver_SSC32.h"
 #include "Capers_II_Code.h"
 
+// //////////////////////
+// ///  PS2 CONTROLS  ///
+// //////////////////////
+
+//  [Common Controls]
+//    - START = Turn on/off the bot
+//    - L1Toggle = Shift mode
+//    - L2Toggle = Rotate mode
+//    - Circle = Toggle, single leg mode
+//    - Square = Toggle, balance mode
+//    - Triangle = Move body to 35mm from the ground (walk pos) 
+//      and back to the ground
+//    - D-Pad up = Body up 10mm
+//    - D-Pad down = Body down 10mm
+//    - D-Pad left = decrease speed with 50mS
+//    - D-Pad right = increase speed with 50mS
+//
+//    Optional: L3 button down, Left stick can adjust leg positions...
+//    or if OPT_SINGLELEG is not defined may try using Circle
+
+//  [Walk Controls]
+//    - SELECT = Switch gaits
+//    - Left Stick = (Walk mode 1) Walk/Strafe
+//                   (Walk mode 2) Disable
+//    - Right Stick = (Walk mode 1) Rotate, 
+//                    (Walk mode 2) Walk/Rotate
+//    - R1 = Toggle, double gait travel speed
+//    - R2 = Toggle, double gait travel length
+//
+//  [Shift Controls]
+//    - Left Stick = Shift body X/Z
+//    - Right Stick = Shift body Y and rotate body Y
+//
+//  [Rotate Controls]
+//    - Left Stick = Rotate body X/Z
+//    - Right Stick = Rotate body Y
+//
+//  [Single leg Controls]
+//    - SELECT = Switch legs
+//    - Left Stick = Move Leg X/Z (relative)
+//    - Right Stick = Move Leg Y (absolute)
+//    - R2 = Hold/release leg position
+//
+//  [GP Player Controls]
+//    - SELECT = Switch Sequences
+//    - R2 = Start Sequence
+//
+
 
 
 // Attribution:
