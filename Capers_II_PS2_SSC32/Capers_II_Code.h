@@ -1,42 +1,30 @@
-//=============================================================================
-//Project Lynxmotion Phoenix
-//Description: Phoenix software
-//Software version: V2.0
-//Date: 29-10-2009
-//Programmer: Jeroen Janssen [aka Xan]
-//         Kurt Eckhardt(KurtE) converted to C and Arduino
-//   Kåre Halvorsen aka Zenta - Makes everything work correctly!     
-//
-// This version of the Phoenix code was ported over to the Arduino Environement
-// and is specifically configured for the Lynxmotion BotBoarduino 
-//
-// Phoenix_Code.h
-//
-//     This contains the main code for the Phoenix project.  It is included in
-//     all of the different configurations of the phoenix code.
-//
-//NEW IN V2.X
-//=============================================================================
-//
-//KNOWN BUGS:
-//    - Lots ;)
-//
-//=============================================================================
-// Header Files
-//=============================================================================
+//  Project: Capers II Hexapod
+//  Author: Toglefritz
+
+/*
+  Controlling hexapod robots requires the use of a type of mathematics called inverse kinematics. For an introduction
+  to inverse kinematics for walking robots, visit http://toglefritz.com/inverse-kinematics-for-walking-robots-an-introduction/.
+  This file contains all of the actual math used to control the robot. The inverse kinematics calculations follow a process
+  
+  * The inverse kinematics calculations start with direct inputs from the robot designer. These inputs include information
+    about the physical construction of the robot including the dimensions for the legs and the robot body, and constraints
+    on the range of motion for the servos. We also have control inputs which are provided by the PS2 driver code.
+  * The actual inverse kinematics calculations begin with calculations based on the position and orientation of the body.
+  * From the body inverse kinematics calculations, do inverse kinematics for each of the six legs. These calculations result
+    in angles for all 18 leg servos on the robot.
+  * Check the servo angles from the inverse kinematics calculations against the mechanical limits of the servos based on the 
+    physical design of the robot. These limits are defined in the robot configuration.
+  * Move the servos.
+  * Repeat the inverse kinematics calculations again for the next loop.
+*/
 
 #define DEFINE_HEX_GLOBALS
 #if ARDUINO>99
 #include <Arduino.h>
 #else
 #endif
-//#include <EEPROM.h>
-//#include <PS2X_lib.h>
-#include <pins_arduino.h>
-//#include <SoftwareSerial.h>        
-#define BalanceDivFactor CNT_LEGS    //;Other values than 6 can be used, testing...CAUTION!! At your own risk ;)
-//#include <Wire.h>
-//#include <I2CEEProm.h>
+#include <pins_arduino.h>       
+#define BalanceDivFactor CNT_LEGS 
 
 // Only compile in Debug code if we have something to output to
 #ifdef DBGSerial
@@ -45,15 +33,18 @@
 #endif
 
 
-//--------------------------------------------------------------------
-//[TABLES]
-//ArcCosinus Table
-//Table build in to 3 part to get higher accuracy near cos = 1. 
-//The biggest error is near cos = 1 and has a biggest value of 3*0.012098rad = 0.521 deg.
+//    ////////////  TRIG TABLES  ////////////
+// The inverse kinematics used to control the robot use a whole bunch of trignometric functions. The trig 
+// functions are quite demanding for a low power processor like the one on an Arduino. Therefore, in order to
+// improve performance, a table of pre-computed trig values is used instead of actually doing the trig functions.
+// The code will look up values in the tables below rather than performing the trig functions.
+
+//  ArcCosinus Table
+//  The biggest error is near cos = 1 and has a biggest value of 3*0.012098rad = 0.521 deg.
 //-    Cos 0 to 0.9 is done by steps of 0.0079 rad. [1/127]
 //-    Cos 0.9 to 0.99 is done by steps of 0.0008 rad [0.1/127]
 //-    Cos 0.99 to 1 is done by step of 0.0002 rad [0.01/64]
-//Since the tables are overlapping the full range of 127+127+64 is not necessary. Total bytes: 277
+//  Since the tables are overlapping the full range of 127+127+64 is not necessary. Total bytes: 277
 
 static const byte GetACos[] PROGMEM = {    
   255,254,252,251,250,249,247,246,245,243,242,241,240,238,237,236,234,233,232,231,229,228,227,225, 
@@ -67,7 +58,7 @@ static const byte GetACos[] PROGMEM = {
   28,27,26,25,24,23,23,23,23,22,22,22,22,21,21,21,21,20,20,20,19,19,19,19,18,18,18,17,17,17,17,16,
   16,16,15,15,15,14,14,13,13,13,12,12,11,11,10,10,9,9,8,7,6,6,5,3,0 };//
 
-//Sin table 90 deg, persision 0.5 deg [180 values]
+//  Sin table 90 deg, persision 0.5 deg [180 values]
 static const word GetSin[] PROGMEM = {
   0, 87, 174, 261, 348, 436, 523, 610, 697, 784, 871, 958, 1045, 1132, 1218, 1305, 1391, 1478, 1564, 
   1650, 1736, 1822, 1908, 1993, 2079, 2164, 2249, 2334, 2419, 2503, 2588, 2672, 2756, 2840, 2923, 3007, 
@@ -82,12 +73,11 @@ static const word GetSin[] PROGMEM = {
   9975, 9981, 9986, 9990, 9993, 9996, 9998, 9999, 10000 };//
 
 
-//Build tables for Leg configuration like I/O and MIN/ Max values to easy access values using a FOR loop
-//Constants are still defined as single values in the cfg file to make it easy to read/configure
+//  Build tables for Leg configuration like I/O and MIN/ Max values to easy access values using a FOR loop
+//  Constants are still defined as single values in the cfg file to make it easy to read/configure
 
-// BUGBUG: Need a cleaner way to define...
-// Lets allow for which legs servos to be inverted to be defined by the robot
-// This is used by the Lynxmotion Symetrical Quad.
+//    ////////////  SERVO INVERT  ////////////
+// The block of definitions below establishes which of the servos will operated in an inverted direction
 #ifndef cRRCoxaInv
 #define cRRCoxaInv 1 
 #endif
@@ -174,45 +164,46 @@ static const word GetSin[] PROGMEM = {
 #endif
 
 
-#ifndef QUADMODE
+//    ////////////  SERVO HORN OFFSETS  ////////////
 // Standard Hexapod...
 // Servo Horn offsets
 #ifdef cRRFemurHornOffset1   // per leg configuration
-static const short cFemurHornOffset1[] PROGMEM = {
-  cRRFemurHornOffset1, cRMFemurHornOffset1, cRFFemurHornOffset1, cLRFemurHornOffset1, cLMFemurHornOffset1, cLFFemurHornOffset1};
-#define CFEMURHORNOFFSET1(LEGI) ((short)pgm_read_word(&cFemurHornOffset1[LEGI]))
-#else   // Fixed per leg, if not defined 0
-#ifndef cFemurHornOffset1
-#define cFemurHornOffset1  0
+  static const short cFemurHornOffset1[] PROGMEM = {
+    cRRFemurHornOffset1, cRMFemurHornOffset1, cRFFemurHornOffset1, cLRFemurHornOffset1, cLMFemurHornOffset1, cLFFemurHornOffset1};
+  #define CFEMURHORNOFFSET1(LEGI) ((short)pgm_read_word(&cFemurHornOffset1[LEGI]))
+  #else   // Fixed per leg, if not defined 0
+    #ifndef cFemurHornOffset1
+    #define cFemurHornOffset1  0
 #endif
 #define CFEMURHORNOFFSET1(LEGI)  (cFemurHornOffset1)
 #endif
 
 #ifdef cRRTibiaHornOffset1   // per leg configuration
-static const short cTibiaHornOffset1[] PROGMEM = {
-  cRRTibiaHornOffset1, cRMTibiaHornOffset1, cRFTibiaHornOffset1, cLRTibiaHornOffset1, cLMTibiaHornOffset1, cLFTibiaHornOffset1};
-#define CTIBIAHORNOFFSET1(LEGI) ((short)pgm_read_word(&cTibiaHornOffset1[LEGI]))
-#else   // Fixed per leg, if not defined 0
-#ifndef cTibiaHornOffset1
-#define cTibiaHornOffset1  0
-#endif
-#define CTIBIAHORNOFFSET1(LEGI)  (cTibiaHornOffset1)
-#endif
-
-#ifdef c4DOF
-#ifdef cRRTarsHornOffset1   // per leg configuration
-static const short cTarsHornOffset1[] PROGMEM = {
-  cRRTarsHornOffset1,  cRMTarsHornOffset1,  cRFTarsHornOffset1,  cLRTarsHornOffset1,  cLMTarsHornOffset1,  cLFTarsHornOffset1};
-#define CTARSHORNOFFSET1(LEGI) ((short)pgm_read_word(&cTarsHornOffset1[LEGI]))
-#else   // Fixed per leg, if not defined 0
-#ifndef cTarsHornOffset1
-#define cTarsHornOffset1  0
-#endif
-#define CTARSHORNOFFSET1(LEGI)  cTarsHornOffset1
-#endif
+    static const short cTibiaHornOffset1[] PROGMEM = {
+      cRRTibiaHornOffset1, cRMTibiaHornOffset1, cRFTibiaHornOffset1, cLRTibiaHornOffset1, cLMTibiaHornOffset1, cLFTibiaHornOffset1};
+    #define CTIBIAHORNOFFSET1(LEGI) ((short)pgm_read_word(&cTibiaHornOffset1[LEGI]))
+  #else   // Fixed per leg, if not defined 0
+    #ifndef cTibiaHornOffset1
+    #define cTibiaHornOffset1  0
+  #endif
+  #define CTIBIAHORNOFFSET1(LEGI)  (cTibiaHornOffset1)
 #endif
 
-//Min / Max values
+
+//  ///////////////////////////////////////////////////////////////////////////////
+//  //////////////////////////    CONFIGURATION INFO   ///////////////////////////
+//  //////////////////////////////////////////////////////////////////////////////
+// The Capers_II_PS2_SSC32 file contains configuration options for the robot. This section
+// of the code takes data from the robot configuration and sets it up for use by the rest 
+// of the code.
+
+
+//  //////////////////  MIN, MAX VALUES //////////////////
+//  The robot configuration contains the ability to input bounds on the range of motion
+//  for the servos so that the code cannot drive the servos farther than the physical 
+//  construction of the robot allows. These values will be put into tables for the code
+//  to access them later.
+
 #ifndef SERVOS_DO_MINMAX
 const short cCoxaMin1[] PROGMEM = {
   cRRCoxaMin1,  cRMCoxaMin1,  cRFCoxaMin1,  cLRCoxaMin1,  cLMCoxaMin1,  cLFCoxaMin1};
@@ -226,13 +217,6 @@ const short cTibiaMin1[] PROGMEM ={
   cRRTibiaMin1, cRMTibiaMin1, cRFTibiaMin1, cLRTibiaMin1, cLMTibiaMin1, cLFTibiaMin1};
 const short cTibiaMax1[] PROGMEM = {
   cRRTibiaMax1, cRMTibiaMax1, cRFTibiaMax1, cLRTibiaMax1, cLMTibiaMax1, cLFTibiaMax1};
-
-#ifdef c4DOF
-const short cTarsMin1[] PROGMEM = {
-  cRRTarsMin1, cRMTarsMin1, cRFTarsMin1, cLRTarsMin1, cLMTarsMin1, cLFTarsMin1};
-const short cTarsMax1[] PROGMEM = {
-  cRRTarsMax1, cRMTarsMax1, cRFTarsMax1, cLRTarsMax1, cLMTarsMax1, cLFTarsMax1};
-#endif
 #endif
 
 // Servo inverse direction
@@ -240,30 +224,29 @@ const bool cCoxaInv[] = {cRRCoxaInv, cRMCoxaInv, cRFCoxaInv, cLRCoxaInv, cLMCoxa
 bool cFemurInv[] = {cRRFemurInv, cRMFemurInv, cRFFemurInv, cLRFemurInv, cLMFemurInv, cLFFemurInv};
 const bool cTibiaInv[] = {cRRTibiaInv, cRMTibiaInv, cRFTibiaInv, cLRTibiaInv, cLMTibiaInv, cLFTibiaInv};
 
-#ifdef c4DOF
-const boolean cTarsInv[] = {cRRTarsInv, cRMTarsInv, cRFTarsInv, cLRTarsInv, cLMTarsInv, cLFTarsInv};
-#endif	
+//  //////////////////  LEG LENGTHS //////////////////
+//  In the robot configuration, the lengths of each segment of each leg are defined. For easy access
+//  by the rest of the code, these values will be placed into a table.
 
-//Leg Lengths
 const byte cCoxaLength[] PROGMEM = {
   cRRCoxaLength,  cRMCoxaLength,  cRFCoxaLength,  cLRCoxaLength,  cLMCoxaLength,  cLFCoxaLength};
 const byte cFemurLength[] PROGMEM = {
   cRRFemurLength, cRMFemurLength, cRFFemurLength, cLRFemurLength, cLMFemurLength, cLFFemurLength};
 const byte cTibiaLength[] PROGMEM = {
   cRRTibiaLength, cRMTibiaLength, cRFTibiaLength, cLRTibiaLength, cLMTibiaLength, cLFTibiaLength};
-#ifdef c4DOF
-const byte cTarsLength[] PROGMEM = {
-  cRRTarsLength, cRMTarsLength, cRFTarsLength, cLRTarsLength, cLMTarsLength, cLFTarsLength};
-#endif
 
+//  //////////////////  BODY OFFSETS //////////////////
+//  In the robot configuration, the physical dimensions of the body are represented
+//  as offsets between the center of the body and the coxa servo horn (this is the 
+//  first joint on each leg). This section takes the offset values and places those
+//  values into tables for the rest of the code to access.
 
-//Body Offsets [distance between the center of the body and the center of the coxa]
 const short cOffsetX[] PROGMEM = {
   cRROffsetX, cRMOffsetX, cRFOffsetX, cLROffsetX, cLMOffsetX, cLFOffsetX};
 const short cOffsetZ[] PROGMEM = {
   cRROffsetZ, cRMOffsetZ, cRFOffsetZ, cLROffsetZ, cLMOffsetZ, cLFOffsetZ};
 
-//Default leg angle
+//  Default leg angle
 const short cCoxaAngle1[] PROGMEM = {
   cRRCoxaAngle1, cRMCoxaAngle1, cRFCoxaAngle1, cLRCoxaAngle1, cLMCoxaAngle1, cLFCoxaAngle1};
 
@@ -272,7 +255,10 @@ const short cCoxaInitAngle1[] PROGMEM = {
   cRRInitCoxaAngle1, cRMInitCoxaAngle1, cRFInitCoxaAngle1, cLRInitCoxaAngle1, cLMInitCoxaAngle1, cLFInitCoxaAngle1};
 #endif
 
-//Start positions for the leg
+//  //////////////////  LEG START POSITIONS //////////////////
+//  The start positions for each leg are defined in the robot configuration. Place these initial position
+//  values into a table for the rest of this code to access.
+
 const short cInitPosX[] PROGMEM = {
   cRRInitPosX, cRMInitPosX, cRFInitPosX, cLRInitPosX, cLMInitPosX, cLFInitPosX};
 const short cInitPosY[] PROGMEM = {
@@ -280,130 +266,16 @@ const short cInitPosY[] PROGMEM = {
 const short cInitPosZ[] PROGMEM = {
   cRRInitPosZ, cRMInitPosZ, cRFInitPosZ, cLRInitPosZ, cLMInitPosZ, cLFInitPosZ};
 
-//=============================================================================
-#else
-// Quads...
-// Servo Horn offsets
-#ifdef cRRFemurHornOffset1   // per leg configuration
-static const short cFemurHornOffset1[] PROGMEM = {
-  cRRFemurHornOffset1, cRFFemurHornOffset1, cLRFemurHornOffset1, cLFFemurHornOffset1};
-#define CFEMURHORNOFFSET1(LEGI) ((short)pgm_read_word(&cFemurHornOffset1[LEGI]))
-#else   // Fixed per leg, if not defined 0
-#ifndef cFemurHornOffset1
-#define cFemurHornOffset1  0
-#endif
-#define CFEMURHORNOFFSET1(LEGI)  (cFemurHornOffset1)
-#endif
-
-#ifdef cRRTibiaHornOffset1   // per leg configuration
-static const short cTibiaHornOffset1[] PROGMEM = {
-  cRRTibiaHornOffset1, cRFTibiaHornOffset1, cLRTibiaHornOffset1, cLFTibiaHornOffset1};
-#define CTIBIAHORNOFFSET1(LEGI) ((short)pgm_read_word(&cTibiaHornOffset1[LEGI]))
-#else   // Fixed per leg, if not defined 0
-#ifndef cTibiaHornOffset1
-#define cTibiaHornOffset1  0
-#endif
-#define CTIBIAHORNOFFSET1(LEGI)  (cTibiaHornOffset1)
-#endif
-
-
-
-#ifdef c4DOF
-#ifdef cRRTarsHornOffset1   // per leg configuration
-static const short cTarsHornOffset1[] PROGMEM = {
-  cRRTarsHornOffset1, cRFTarsHornOffset1,  cLRTarsHornOffset1, cLFTarsHornOffset1};
-#define CTARSHORNOFFSET1(LEGI) ((short)pgm_read_word(&cTarsHornOffset1[LEGI]))
-#else   // Fixed per leg, if not defined 0
-#ifndef cTarsHornOffset1
-#define cTarsHornOffset1  0
-#endif
-#define CTARSHORNOFFSET1(LEGI)  cTarsHornOffset1
-#endif
-#endif
-
-//Min / Max values
-#ifndef SERVOS_DO_MINMAX
-const short cCoxaMin1[] PROGMEM = {
-  cRRCoxaMin1,  cRFCoxaMin1,  cLRCoxaMin1,  cLFCoxaMin1};
-const short cCoxaMax1[] PROGMEM = {
-  cRRCoxaMax1,  cRFCoxaMax1,  cLRCoxaMax1,  cLFCoxaMax1};
-const short cFemurMin1[] PROGMEM ={
-  cRRFemurMin1, cRFFemurMin1, cLRFemurMin1, cLFFemurMin1};
-const short cFemurMax1[] PROGMEM ={
-  cRRFemurMax1, cRFFemurMax1, cLRFemurMax1, cLFFemurMax1};
-const short cTibiaMin1[] PROGMEM ={
-  cRRTibiaMin1, cRFTibiaMin1, cLRTibiaMin1, cLFTibiaMin1};
-const short cTibiaMax1[] PROGMEM = {
-  cRRTibiaMax1, cRFTibiaMax1, cLRTibiaMax1, cLFTibiaMax1};
-
-#ifdef c4DOF
-const short cTarsMin1[] PROGMEM = {
-  cRRTarsMin1, cRFTarsMin1, cLRTarsMin1, cLFTarsMin1};
-const short cTarsMax1[] PROGMEM = {
-  cRRTarsMax1, cRFTarsMax1, cLRTarsMax1, cLFTarsMax1};
-#endif
-#endif
-
-// Servo inverse direction
-const bool cCoxaInv[] = {cRRCoxaInv, cRFCoxaInv, cLRCoxaInv, cLFCoxaInv};
-bool cFemurInv[] = {cRRFemurInv, cRFFemurInv, cLRFemurInv, cLFFemurInv};
-const bool cTibiaInv[] = {cRRTibiaInv, cRFTibiaInv, cLRTibiaInv, cLFTibiaInv};
-
-#ifdef c4DOF
-const boolean cTarsInv[] = {
-	cRRTarsInv, cRFTarsInv, cLRTarsInv, cLFTarsInv};
-#endif	
-	
-
-
-//Leg Lengths
-const byte cCoxaLength[] PROGMEM = {
-  cRRCoxaLength,  cRFCoxaLength,  cLRCoxaLength,  cLFCoxaLength};
-const byte cFemurLength[] PROGMEM = {
-  cRRFemurLength, cRFFemurLength, cLRFemurLength, cLFFemurLength};
-const byte cTibiaLength[] PROGMEM = {
-  cRRTibiaLength, cRFTibiaLength, cLRTibiaLength, cLFTibiaLength};
-#ifdef c4DOF
-const byte cTarsLength[] PROGMEM = {
-  cRRTarsLength, cRFTarsLength, cLRTarsLength, cLFTarsLength};
-#endif
-
-
-//Body Offsets [distance between the center of the body and the center of the coxa]
-const short cOffsetX[] PROGMEM = {
-  cRROffsetX, cRFOffsetX, cLROffsetX, cLFOffsetX};
-const short cOffsetZ[] PROGMEM = {
-  cRROffsetZ, cRFOffsetZ, cLROffsetZ, cLFOffsetZ};
-
-//Default leg angle
-const short cCoxaAngle1[] PROGMEM = {
-  cRRCoxaAngle1, cRFCoxaAngle1, cLRCoxaAngle1, cLFCoxaAngle1};
-
-#ifdef cRRInitCoxaAngle1    // We can set different angles for the legs than just where they servo horns are set...
-const short cCoxaInitAngle1[] PROGMEM = {
-  cRRInitCoxaAngle1, cRFInitCoxaAngle1, cLRInitCoxaAngle1, cLFInitCoxaAngle1};
-#endif
-
-
-//Start positions for the leg
-const short cInitPosX[] PROGMEM = {
-  cRRInitPosX, cRFInitPosX, cLRInitPosX, cLFInitPosX};
-const short cInitPosY[] PROGMEM = {
-  cRRInitPosY, cRFInitPosY, cLRInitPosY, cLFInitPosY};
-const short cInitPosZ[] PROGMEM = {
-  cRRInitPosZ, cRFInitPosZ, cLRInitPosZ, cLFInitPosZ};
-
-#endif
-
 // Define some globals for debug information
 boolean g_fShowDebugPrompt;
 boolean g_fDebugOutput;
 boolean g_fEnableServos = true;
 
-//--------------------------------------------------------------------
-//[REMOTE]                 
+
+//  ///////////////////////////////////////////////////////////////////////////
+//  //////////////////////////    CONTROLLER INFO   ///////////////////////////
+//  ///////////////////////////////////////////////////////////////////////////
 #define cTravelDeadZone         4    //The deadzone for the analog input from the remote
-//====================================================================
 //[ANGLES]
 short           CoxaAngle1[CNT_LEGS];    //Actual Angle of the horizontal hip, decimals = 1
 short           FemurAngle1[CNT_LEGS];   //Actual Angle of the vertical hip, decimals = 1
@@ -412,24 +284,18 @@ short           TibiaAngle1[CNT_LEGS];   //Actual Angle of the knee, decimals = 
 short           TarsAngle1[CNT_LEGS];	  //Actual Angle of the knee, decimals = 1
 #endif
 
-//--------------------------------------------------------------------
 //[POSITIONS SINGLE LEG CONTROL]
 
 short           LegPosX[CNT_LEGS];    //Actual X Posion of the Leg
 short           LegPosY[CNT_LEGS];    //Actual Y Posion of the Leg
 short           LegPosZ[CNT_LEGS];    //Actual Z Posion of the Leg
-//--------------------------------------------------------------------
-//[INPUTS]
 
-//--------------------------------------------------------------------
-//[GP PLAYER]
-//--------------------------------------------------------------------
 //[OUTPUTS]
 boolean         LedA;    //Red
 boolean         LedB;    //Green
 boolean         LedC;    //Orange
 boolean         Eyes;    //Eyes output
-//--------------------------------------------------------------------
+
 //[VARIABLES]
 byte            Index;                    //Index universal used
 byte            LegIndex;                //Index used for leg Index Number
@@ -462,7 +328,7 @@ long            IKFeetPosZ;        //Input Position of the Feet Z
 boolean         IKSolution;        //Output true if the solution is possible
 boolean         IKSolutionWarning;    //Output true if the solution is NEARLY possible
 boolean         IKSolutionError;    //Output true if the solution is NOT possible
-//--------------------------------------------------------------------
+
 //[TIMING]
 unsigned long   lTimerStart;    //Start time of the calculation cycles
 unsigned long   lTimerEnd;        //End time of the calculation cycles
@@ -470,10 +336,6 @@ byte            CycleTime;        //Total Cycle time
 
 word            ServoMoveTime;        //Time for servo updates
 word            PrevServoMoveTime;    //Previous time for the servo updates
-
-//--------------------------------------------------------------------
-//[GLOABAL]
-//--------------------------------------------------------------------
 
 // Define our global Input Control State object
 INCONTROLSTATE   g_InControlState;      // This is our global Input control state object...
@@ -484,10 +346,6 @@ ServoDriver  g_ServoDriver;      // our global servo driver class
 boolean         g_fLowVoltageShutdown;    // If set the bot shuts down because the input voltage is to low
 uint16_t      Voltage;
 
-
-//--boolean         g_InControlState.fRobotOn;            //Switch to turn on Phoenix
-//--boolean         g_InControlState.fPrev_RobotOn;        //Previous loop state 
-//--------------------------------------------------------------------
 //[Balance]
 long            TotalTransX;
 long            TotalTransZ;
@@ -495,21 +353,18 @@ long            TotalTransY;
 long            TotalYBal1;
 long            TotalXBal1;
 long            TotalZBal1;
+
 //[Single Leg Control]
 byte            PrevSelectedLeg;
 boolean         AllDown;
 
-//[gait - State]
-// Note: Information about the current gait is now part of the g_InControlState...
-boolean         TravelRequest;          //Temp to check if the gait is in motion
+boolean         TravelRequest;          // Temp to check if the gait is in motion
 
-long            GaitPosX[CNT_LEGS];         //Array containing Relative X position corresponding to the Gait
-long            GaitPosY[CNT_LEGS];         //Array containing Relative Y position corresponding to the Gait
-long            GaitPosZ[CNT_LEGS];         //Array containing Relative Z position corresponding to the Gait
-long            GaitRotY[CNT_LEGS];         //Array containing Relative Y rotation corresponding to the Gait
+long            GaitPosX[CNT_LEGS];         // Array containing Relative X position corresponding to the Gait
+long            GaitPosY[CNT_LEGS];         // Array containing Relative Y position corresponding to the Gait
+long            GaitPosZ[CNT_LEGS];         // Array containing Relative Z position corresponding to the Gait
+long            GaitRotY[CNT_LEGS];         // Array containing Relative Y rotation corresponding to the Gait
 
-//boolean			GaitLegInAir[CNT_LEGS];		// True if leg is in the air
-//byte			GaitNextLeg;				// The next leg which will be lifted
 
 boolean         fWalking;            //  True if the robot are walking
 byte            bExtraCycle;          // Forcing some extra timed cycles for avoiding "end of gait bug"
@@ -517,20 +372,20 @@ byte            bExtraCycle;          // Forcing some extra timed cycles for avo
 
 boolean        g_fRobotUpsideDown;    // Is the robot upside down?
 boolean        fRobotUpsideDownPrev;
-//=============================================================================
-// Define our default standard Gaits
-//=============================================================================
+
+
+//  ////////////////////////////////////////////////////////////////////////////
+//  //////////////////////////    GAIT INFORMATION   ///////////////////////////
+//  ////////////////////////////////////////////////////////////////////////////
+
 #ifndef DEFAULT_GAIT_SPEED
 #define DEFAULT_GAIT_SPEED 50
 #define DEFAULT_SLOW_GAIT 70
 #endif
 
-//cRR=0, cRF, cLR, cLF, CNT_LEGS};
-
 #ifndef OVERWRITE_GAITS
 #ifndef QUADMODE
 //  Speed, Steps, Lifted, Front Down, Lifted Factor, Half Height, On Ground, 
-//     Quad extra: COGAngleStart, COGAngleStep, CogRadius, COGCCW
 //                      { RR, <RM> RF, LR, <LM>, LF}
 #ifdef DISPLAY_GAIT_NAMES
 extern "C" {
@@ -568,7 +423,6 @@ PHOENIXGAIT APG[] = {
 
 #endif
 #endif
-//--------------------------------------------------------------------
 
 #ifdef ADD_GAITS
 byte NUM_GAITS = sizeof(APG)/sizeof(APG[0]) + sizeof(APG_EXTRA)/sizeof(APG_EXTRA[0]);
@@ -578,9 +432,9 @@ byte NUM_GAITS = sizeof(APG)/sizeof(APG[0]);
 
 
 
-//=============================================================================
-// Function prototypes
-//=============================================================================
+//  /////////////////////////////////////////////////////////////////////
+//  //////////////////////////    FUNCTIONS   ///////////////////////////
+//  /////////////////////////////////////////////////////////////////////
 extern void GaitSelect(void);
 extern void  WriteOutputs(void);    
 extern void SingleLegControl(void);
@@ -588,10 +442,8 @@ extern void GaitSeq(void);
 extern void BalanceBody(void);
 extern void CheckAngles();
 
-extern void    PrintSystemStuff(void);            // Try to see why we fault...
+extern void    PrintSystemStuff(void);     
 
-
-//extern void  GaitGetNextLeg(byte GaitStep);
 extern void BalCalcOneLeg (long PosX, long PosZ, long PosY, byte BalLegNr);
 extern void BodyFK (short PosX, short PosZ, short PosY, short RotationY, byte BodyIKLeg) ;
 extern void LegIK (short IKFeetPosX, short IKFeetPosY, short IKFeetPosZ, byte LegIKLegNr);
@@ -603,9 +455,11 @@ extern unsigned long isqrt32 (unsigned long n);
 extern void StartUpdateServos(void);
 extern boolean TerminalMonitor(void);
 
+
 //--------------------------------------------------------------------------
-// SETUP: the main arduino setup function.
+// SETUP: The main arduino setup function.
 //--------------------------------------------------------------------------
+
 void setup(){
 #ifdef OPT_SKETCHSETUP
   SketchSetup();
@@ -645,12 +499,12 @@ void setup(){
   g_InControlState.SelectedLeg = 255; // No Leg selected
   PrevSelectedLeg = 255;
 #endif
-  //Body Positions
+  // Body Positions
   g_InControlState.BodyPos.x = 0;
   g_InControlState.BodyPos.y = 0;
   g_InControlState.BodyPos.z = 0;
 
-  //Body Rotations
+  // Body Rotations
   g_InControlState.BodyRot1.x = 0;
   g_InControlState.BodyRot1.y = 0;
   g_InControlState.BodyRot1.z = 0;
@@ -695,14 +549,13 @@ void setup(){
 }
 
 
-//=============================================================================
+//--------------------------------------------------------------------------
 // Loop: the main arduino main Loop function
-//=============================================================================
-
+//--------------------------------------------------------------------------
 
 void loop(void)
 {
-  //Start time
+  // Start time
   unsigned long lTimeWaitEnd;
   lTimerStart = millis(); 
   DoBackgroundProcess();
@@ -747,7 +600,7 @@ void loop(void)
     return;  // go back to process the next message
 #endif
 
-  //Single leg control
+  // Single leg control
   SingleLegControl ();
   DoBackgroundProcess();
 
@@ -797,12 +650,17 @@ void loop(void)
   }
 
 
-  //Reset IKsolution indicators 
+  // Reset IKsolution indicators 
   IKSolution = 0 ;
   IKSolutionWarning = 0; 
   IKSolutionError = 0 ;
 
-  //Do IK for all Right legs
+
+//  /////////////////////////////////////////////////////////////////////////////////
+//  //////////////////////////    START IK CALCULATIONS   ///////////////////////////
+//  /////////////////////////////////////////////////////////////////////////////////
+
+// Do IK for all Right legs
 #ifdef DEBUG
     if (g_fDebugOutput && g_InControlState.fRobotOn) {
         DBGSerial.print(g_InControlState.GaitStep,DEC);
@@ -822,7 +680,7 @@ void loop(void)
     LegPosZ[LegIndex]+g_InControlState.BodyPos.z-BodyFKPosZ+GaitPosZ[LegIndex] - TotalTransZ, LegIndex);
   }
 
-  //Do IK for all Left legs  
+  // Do IK for all Left legs  
   for (LegIndex = (CNT_LEGS/2); LegIndex < CNT_LEGS; LegIndex++) {
     DoBackgroundProcess();
     BodyFK(LegPosX[LegIndex]-g_InControlState.BodyPos.x+GaitPosX[LegIndex] - TotalTransX,
@@ -840,14 +698,14 @@ void loop(void)
     g_InControlState.BodyRot1.z = -g_InControlState.BodyRot1.z;
   }
 #endif
-  //Check mechanical limits
+  // Check mechanical limits
   CheckAngles();
 
-  //Write IK errors to leds
+  // Write IK errors to leds
   LedC = IKSolutionWarning;
   LedA = IKSolutionError;
 
-  //Drive Servos
+  // Drive Servos
   if (g_InControlState.fRobotOn) {
     if (g_InControlState.fRobotOn && !g_InControlState.fPrev_RobotOn) {
       MSound(3, 60, 2000, 80, 2250, 100, 2500);
@@ -939,7 +797,7 @@ void loop(void)
 
   } 
   else {
-    //Turn the bot off - May need to add ajust here...
+    // Turn the bot off
     if (g_InControlState.fPrev_RobotOn || (AllDown= 0)) {
       ServoMoveTime = 600;
       StartUpdateServos();
@@ -1009,32 +867,23 @@ void StartUpdateServos()
 #endif  
 }
 
-
-
-
-//--------------------------------------------------------------------
 //[WriteOutputs] Updates the state of the leds
-//--------------------------------------------------------------------
+
 void WriteOutputs(void)
 {
 #ifdef cEyesPin
   digitalWrite(cEyesPin, Eyes);
 #endif        
 }
-//--------------------------------------------------------------------
-//[CHECK VOLTAGE]
-//Reads the input voltage and shuts down the bot when the power drops
+
+//  //////////////////  CHECK VOLTAGE //////////////////
+//  Read the input voltage and shuts down the bot when the power drops. This prevents damage to the battery, the controller,
+//  the servos, or some combination of all those parts.
+
 byte s_bLVBeepCnt;
 boolean CheckVoltage() {
 #ifdef cTurnOffVol
-  // Moved to Servo Driver - BUGBUG: Need to do when I merge back...
-  //    Voltage = analogRead(cVoltagePin); // Battery voltage 
-  //    Voltage = ((long)Voltage*1955)/1000;
   Voltage = g_ServoDriver.GetBatteryVoltage();
-
-  // BUGBUG:: if voltage is 0 it failed to retrieve don't hang program...
-  //    if (!Voltage)
-  //      return;
 
   if (!g_fLowVoltageShutdown) {
     if ((Voltage < cTurnOffVol) || (Voltage >= 1999)) {
@@ -1085,13 +934,16 @@ boolean CheckVoltage() {
   return g_fLowVoltageShutdown;
 }
 
-//--------------------------------------------------------------------
-//[SINGLE LEG CONTROL]
+
+//  //////////////////  SINGLE LEG CONTROL //////////////////
+//  In single leg control, controller inputs move, as the name implies, a single leg on the robot.
+
 void SingleLegControl(void)
 {
 #ifdef OPT_SINGLELEG
 
-  //Check if all legs are down
+  // Check if all legs are down because if there are legs in the air, we do not want to lift any other legs
+  // or else the robot could tip over.
   AllDown = (LegPosY[cRF]==(short)pgm_read_word(&cInitPosY[cRF])) && 
     (LegPosY[cRR]==(short)pgm_read_word(&cInitPosY[cRR])) && 
     (LegPosY[cLR]==(short)pgm_read_word(&cInitPosY[cLR])) && 
@@ -1106,7 +958,7 @@ void SingleLegControl(void)
       if (AllDown) { //Lift leg a bit when it got selected
         LegPosY[g_InControlState.SelectedLeg] = (short)pgm_read_word(&cInitPosY[g_InControlState.SelectedLeg])-20;
 
-        //Store current status
+        // Store current status
         PrevSelectedLeg = g_InControlState.SelectedLeg;
       } 
       else {//Return prev leg back to the init position
@@ -1181,12 +1033,15 @@ void GaitSelect(void)
 
 }    
 
-//--------------------------------------------------------------------
-//[GAIT Sequence]
+
+//  //////////////////////////////////////////////////////////////////////////
+//  //////////////////////////    GAIT SEQUENCE   ///////////////////////////
+//  /////////////////////////////////////////////////////////////////////////
+
 void GaitSeq(void)
 {
-  //Check if the Gait is in motion - If not if we are going to start a motion try to align our Gaitstep to start with a good foot
-  // for the direction we are about to go...
+  // Check if the Gait is in motion - If not if we are going to start a motion try to align our Gaitstep to start with a good foot
+  // for the direction we are about to go. This makes for a smooth gait motion.
   
   if (fWalking || (g_InControlState.ForceGaitStepCnt != 0))
 	TravelRequest = true;	// Is walking or was walking...
@@ -1197,7 +1052,7 @@ void GaitSeq(void)
 
     if (TravelRequest) {
 #ifdef QUADCODE
-		// just start walking - Try to guess a good foot to start off on...
+		// Just start walking - Try to guess a good foot to start off on...
 		if (g_InControlState.TravelLength.z < 0) 
             g_InControlState.GaitStep = ((g_InControlState.TravelLength.X < 0)? g_InControlState.gaitCur.GaitLegNr[cLR] : g_InControlState.gaitCur.GaitLegNr[cRR]);
 		else 
@@ -1229,8 +1084,10 @@ void GaitSeq(void)
 }
 
 
-//--------------------------------------------------------------------
-//[GAIT]
+//  ////////////////////////////////////////////////////////////////
+//  //////////////////////////    GAIT   ///////////////////////////
+//  ////////////////////////////////////////////////////////////////
+
 void Gait (byte GaitCurrentLegNr)
 {
 
@@ -1301,8 +1158,10 @@ void Gait (byte GaitCurrentLegNr)
 
 }  
 
-//--------------------------------------------------------------------
-//[BalCalcOneLeg]
+//  /////////////////////////////////////////////////////////////////////////////////////
+//  //////////////////////////    BALANCE CALCULATION - LEG   ///////////////////////////
+//  ////////////////////////////////////////////////////////////////////////////////////
+
 void BalCalcOneLeg (long PosX, long PosZ, long PosY, byte BalLegNr)
 {
   long            CPR_X;            //Final X value for centerpoint of rotation
@@ -1349,8 +1208,10 @@ void BalCalcOneLeg (long PosX, long PosZ, long PosY, byte BalLegNr)
 #endif  
 
 }  
-//--------------------------------------------------------------------
-//[BalanceBody]
+
+//  //////////////////////////////////////////////////////////////////////////////////////
+//  //////////////////////////    BALANCE CALCULATION - BODY   ///////////////////////////
+//  //////////////////////////////////////////////////////////////////////////////////////
 void BalanceBody(void)
 {
 #ifdef QUADMODE
@@ -1454,14 +1315,23 @@ void BalanceBody(void)
   } 
 #endif  
 }
-//--------------------------------------------------------------------
+
+
+//  //////////////////////////////////////////////////////////////////////////
+//  //////////////////////////    TRIG FUNCTIONS   ///////////////////////////
+//  //////////////////////////////////////////////////////////////////////////
+// This section contains functions for doing all of the various trig operations needed for the 
+// inverse kinematics calculations. The functions use the trig tables at the top of this 
+// document rather than actually performing the trig functions. This saves considerably on 
+// computational performance.
+
 //[GETSINCOS] Get the sinus and cosinus from the angle +/- multiple circles
 //AngleDeg1     - Input Angle in degrees
 //sin4        - Output Sinus of AngleDeg
 //cos4          - Output Cosinus of AngleDeg
 void GetSinCos(short AngleDeg1)
 {
-  short        ABSAngleDeg1;    //Absolute value of the Angle in Degrees, decimals = 1
+  short        ABSAngleDeg1;    // Absolute value of the Angle in Degrees, decimals = 1
   //Get the absolute value of AngleDeg
   if (AngleDeg1 < 0)
     ABSAngleDeg1 = AngleDeg1 *-1;
@@ -1499,7 +1369,6 @@ void GetSinCos(short AngleDeg1)
 }    
 
 
-//--------------------------------------------------------------------
 //(GETARCCOS) Get the sinus and cosinus from the angle +/- multiple circles
 //cos4        - Input Cosinus
 //AngleRad4     - Output Angle in AngleRad4
@@ -1567,7 +1436,6 @@ unsigned long isqrt32 (unsigned long n) //
 }
 
 
-//--------------------------------------------------------------------
 //(GETATAN2) Simplyfied ArcTan2 function based on fixed point ArcCos
 //ArcTanX         - Input X
 //ArcTanY         - Input Y
@@ -1585,8 +1453,12 @@ short GetATan2 (short AtanX, short AtanY)
   return Atan4;
 }    
 
-//--------------------------------------------------------------------
-//(BODY INVERSE KINEMATICS) 
+//  ////////////////////////////////////////////////////////////////////////////////////
+//  //////////////////////////    BODY INVERSE KINEMATICS  ////////////////////////////
+//  ///////////////////////////////////////////////////////////////////////////////////
+// If you want to learn more about the inverse kinematics calculations involved in controlling the hexapod robot,
+// visit http://toglefritz.com/hexapod-inverse-kinematics-equations/
+
 //BodyRotX         - Global Input pitch of the body 
 //BodyRotY         - Global Input rotation of the body 
 //BodyRotZ         - Global Input roll of the body 
@@ -1654,8 +1526,10 @@ void BodyFK (short PosX, short PosZ, short PosY, short RotationY, byte BodyIKLeg
 
 
 
-//--------------------------------------------------------------------
-//[LEG INVERSE KINEMATICS] Calculates the angles of the coxa, femur and tibia for the given position of the feet
+//  /////////////////////////////////////////////////////////////////////////////////////
+//  //////////////////////////    LEG INVERSE KINEMATICS  //////////////////////////////
+//  ////////////////////////////////////////////////////////////////////////////////////
+// Calculates the angles of the coxa, femur and tibia for the given position of the feet
 //IKFeetPosX            - Input position of the Feet X
 //IKFeetPosY            - Input position of the Feet Y
 //IKFeetPosZ            - Input Position of the Feet Z
@@ -1665,7 +1539,7 @@ void BodyFK (short PosX, short PosZ, short PosY, short RotationY, byte BodyIKLeg
 //FemurAngle1           - Output Angle of Femur in degrees
 //TibiaAngle1           - Output Angle of Tibia in degrees
 //CoxaAngle1            - Output Angle of Coxa in degrees
-//--------------------------------------------------------------------
+
 void LegIK (short IKFeetPosX, short IKFeetPosY, short IKFeetPosZ, byte LegIKLegNr)
 {
   unsigned long    IKSW2;            //Length between Shoulder and Wrist, decimals = 2
@@ -1796,14 +1670,6 @@ void LegIK (short IKFeetPosX, short IKFeetPosY, short IKFeetPosZ, byte LegIKLegN
 #endif
 #endif
 
-#ifdef c4DOF
-  //Tars angle
-  if ((byte)pgm_read_byte(&cTarsLength[LegIKLegNr])) {    // We allow mix of 3 and 4 DOF legs...
-    TarsAngle1[LegIKLegNr] = (TarsToGroundAngle1 + FemurAngle1[LegIKLegNr] - TibiaAngle1[LegIKLegNr]) 
-      + CTARSHORNOFFSET1(LegIKLegNr);
-  }
-#endif
-
   //Set the Solution quality    
   if(IKSW2 < ((word)((byte)pgm_read_byte(&cFemurLength[LegIKLegNr])+(byte)pgm_read_byte(&cTibiaLength[LegIKLegNr])-30)*c2DEC))
     IKSolution = 1;
@@ -1836,9 +1702,12 @@ void LegIK (short IKFeetPosX, short IKFeetPosY, short IKFeetPosZ, byte LegIKLegN
 #endif  
 }
 
-//--------------------------------------------------------------------
-//[CHECK ANGLES] Checks the mechanical limits of the servos
-//--------------------------------------------------------------------
+
+//  ////////////////////////////////////////////////////////////////////////
+//  //////////////////////////    CHECK ANGLES  ////////////////////////////
+//  ////////////////////////////////////////////////////////////////////////
+// Check the angles of the servos against the mechanical constraints defined in the robot configuration.
+
 short CheckServoAngleBounds(short sID,  short sVal, const short *sMin PROGMEM, const short *sMax PROGMEM) {
 
     // Pull into simple function as so I can report errors on debug 
@@ -1874,9 +1743,6 @@ short CheckServoAngleBounds(short sID,  short sVal, const short *sMin PROGMEM, c
   
 }
 
-//--------------------------------------------------------------------
-//[CHECK ANGLES] Checks the mechanical limits of the servos
-//--------------------------------------------------------------------
 void CheckAngles(void)
 {
 #ifndef SERVOS_DO_MINMAX
@@ -2078,7 +1944,6 @@ void AdjustLegPositionsToBodyHeight()
 
 }
 
-// BUGBUG:: Move to some library...
 //==============================================================================
 //    SoundNoTimer - Quick and dirty tone function to try to output a frequency
 //            to a speaker for some simple sounds.
