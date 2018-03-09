@@ -182,10 +182,10 @@
 
 // There are two ways this section can be configured. First, if all the sections of all the legs are
 // the same length, universal dimensions can be used. These are the dimensions with XX in the beginning
-// part.
-#define cXXCoxaLength     29    // This is for TH3-R legs
-#define cXXFemurLength    76
-#define cXXTibiaLength    106
+// part. The dimensions are millimeters.
+#define cXXCoxaLength     29    
+#define cXXFemurLength    85
+#define cXXTibiaLength    125
 
 // If the lengths of each leg are not the same, the legs that differ from the universal lengths can be
 // set individually in th sections below.
@@ -232,19 +232,19 @@
 #define cLMCoxaAngle1    0          //  Default Coxa setup angle, decimals = 1
 #define cLFCoxaAngle1    600        //  Default Coxa setup angle, decimals = 1
 
-#define cRROffsetX  -43     //  Distance X from center of the body to the Right Rear coxa
-#define cRROffsetZ  82      //  Distance Z from center of the body to the Right Rear coxa
-#define cRMOffsetX  -63     //  Distance X from center of the body to the Right Middle coxa
+#define cRROffsetX  -39     //  Distance X from center of the body to the Right Rear coxa
+#define cRROffsetZ  75      //  Distance Z from center of the body to the Right Rear coxa
+#define cRMOffsetX  -64     //  Distance X from center of the body to the Right Middle coxa
 #define cRMOffsetZ  0       //  Distance Z from center of the body to the Right Middle coxa
-#define cRFOffsetX  -43     //  Distance X from center of the body to the Right Front coxa
-#define cRFOffsetZ  -82     //  Distance Z from center of the body to the Right Front coxa
+#define cRFOffsetX  -39     //  Distance X from center of the body to the Right Front coxa
+#define cRFOffsetZ  -75     //  Distance Z from center of the body to the Right Front coxa
 
-#define cLROffsetX  43      //  Distance X from center of the body to the Left Rear coxa
-#define cLROffsetZ  82      //  Distance Z from center of the body to the Left Rear coxa
-#define cLMOffsetX  63      //  Distance X from center of the body to the Left Middle coxa
+#define cLROffsetX  39      //  Distance X from center of the body to the Left Rear coxa
+#define cLROffsetZ  75      //  Distance Z from center of the body to the Left Rear coxa
+#define cLMOffsetX  64      //  Distance X from center of the body to the Left Middle coxa
 #define cLMOffsetZ  0       //  Distance Z from center of the body to the Left Middle coxa
-#define cLFOffsetX  43      //  Distance X from center of the body to the Left Front coxa
-#define cLFOffsetZ  -82     //  Distance Z from center of the body to the Left Front coxa
+#define cLFOffsetX  39      //  Distance X from center of the body to the Left Front coxa
+#define cLFOffsetZ  -75     //  Distance Z from center of the body to the Left Front coxa
 
 //  /////////////////////////////
 //  /// START POSITIONS FEET  ///
