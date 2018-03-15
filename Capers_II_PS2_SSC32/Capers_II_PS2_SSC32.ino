@@ -91,9 +91,9 @@
 #define cSSC_OUT     12        //Output pin for (SSC32 RX) on BotBoard (Yellow)
 #define cSSC_IN      13       //Input pin for (SSC32 TX) on BotBoard (Blue)
 
-//  ///////////////////////
-//  /// SSC PIN NUMBERS ///
-//  ///////////////////////
+//  //////////////////////////
+//  /// SSC-32 PIN NUMBERS ///
+//  //////////////////////////
 // This section defines which servos are connected to which pins on the SSC32
 #define cRRCoxaPin      0   //Rear Right leg Hip Horizontal
 #define cRRFemurPin     1   //Rear Right leg Hip Vertical
