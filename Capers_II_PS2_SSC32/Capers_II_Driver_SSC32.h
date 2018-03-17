@@ -560,7 +560,7 @@ void FindServoOffsets()
   }
 
   // OK lets move all of the servos to their zero point.
-  SSerial.println("Adjust the zero position of each servo.");
+  Serial.println("Adjust the zero position of each servo.");
   Serial.println("First choose a leg: 0-5 chooses a leg; C-Coxa, F-Femur, T-Tibia chooses a servo");
   Serial.println("Leg order:\n 0: RR \n 1: RM \n 2: RF \n 3: LR \n 4: LM \n 5: LF");
   Serial.println("Commands:  $ exit; +, - changes zero position; * change servo");
