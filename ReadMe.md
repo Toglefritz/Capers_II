@@ -32,3 +32,7 @@ The robot's frame is constructed from CNC cut aluminum which is strong but also 
 To use this code you need to copy each of the folders inside the *libraries* directory into your Arduino Library directory.  
 
 In the Arduino IDE, open **Capers_II_PS2_SSC32.ino**. If the frame on your robot differs from the design in the *frame* directory, the .ino file contains robot configuration options for inputting the geometry of your frame.
+
+## Build Instructions
+
+Instructions for building the robot can be found on Instructables [Instructables](https://www.instructables.com/id/Capers-II-a-Hexapod-Robot).
